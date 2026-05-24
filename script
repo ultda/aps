@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agma.io Private Servers
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.7.1
 // @description  Adds private servers to agma.io and persists selection
 // @author       Pisano
 // @match        https://agma.io/
@@ -16,7 +16,7 @@
     const CUSTOM_SERVERS = [
         {
             id: 'PrivTest',
-            name: 'EU | Instant Test',
+            name: 'EU | Private 1 ',
             address: 'ws1.distrbt.xyz',
             description: 'Private Testing Server',
             gamemode: 'Experimental',
