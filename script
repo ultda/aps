@@ -1,0 +1,250 @@
+// ==UserScript==
+// @name         Agma.io Private Servers
+// @namespace    http://tampermonkey.net/
+// @version      1.6
+// @description  Adds private servers to agma.io and persists selection
+// @author       Pisano
+// @match        https://agma.io/
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const CUSTOM_SERVERS = [
+        {
+            id: 'PrivTest',
+            name: 'EU | Instant Test',
+            address: 'ws1.distrbt.xyz',
+            description: 'Private Testing Server',
+            gamemode: 'Experimental',
+            players: 0,
+            maxPlayers: 100,
+            location: 1
+        }
+    ];
+
+    const LS_CUSTOM = 'privServers';
+    const LS_SELECTED = 'privSelectedServer';
+
+    const injectStyles = () => {
+        if (document.getElementById('priv-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'priv-styles';
+        style.textContent = `
+            .tabbed > section > h1 {
+                width: auto !important;
+                float: left !important;
+                height: 40px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                position: relative !important;
+                top: 1px !important;
+            }
+            .tabbed > section > h1 label {
+                padding: 0 16px !important;
+                line-height: 40px !important;
+                display: block !important;
+                white-space: nowrap !important;
+                cursor: pointer;
+                font-size: 14px;
+            }
+            #tabPRIV:checked ~ #sectPRIV { display: block !important; }
+            label[for="tabPRIV"] { color: #ffc107 !important; }
+            .priv-hidden { display: none !important; }
+        `;
+        document.head.appendChild(style);
+    };
+
+    const readJSON = (key, fallback) => {
+        try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+        catch { return fallback; }
+    };
+
+    const writeJSON = (key, value) => {
+        localStorage.setItem(key, JSON.stringify(value));
+    };
+
+    const syncCustomServers = () => {
+        writeJSON(LS_CUSTOM, CUSTOM_SERVERS);
+
+        let servers = readJSON('gameservers', []);
+        const selectedAddress = localStorage.getItem(LS_SELECTED);
+
+        for (const custom of CUSTOM_SERVERS) {
+            let entry = servers.find(s => s.address === custom.address);
+            if (!entry) {
+                entry = {
+                    id: custom.id,
+                    name: custom.name,
+                    description: custom.description,
+                    address: custom.address,
+                    location: custom.location,
+                    gamemode: custom.gamemode,
+                    players: custom.players,
+                    maxPlayers: custom.maxPlayers,
+                    isCurrent: false
+                };
+                servers.push(entry);
+            } else {
+                Object.assign(entry, {
+                    name: custom.name,
+                    description: custom.description,
+                    location: custom.location,
+                    gamemode: custom.gamemode,
+                    maxPlayers: custom.maxPlayers
+                });
+            }
+            entry.isCurrent = entry.address === selectedAddress;
+        }
+
+        if (selectedAddress && CUSTOM_SERVERS.some(s => s.address === selectedAddress)) {
+            servers.forEach(s => {
+                s.isCurrent = s.address === selectedAddress;
+            });
+        }
+
+        writeJSON('gameservers', servers);
+    };
+
+    const saveSelectedServer = (address, name) => {
+        localStorage.setItem(LS_SELECTED, address);
+
+        let servers = readJSON('gameservers', []);
+        let entry = servers.find(s => s.address === address);
+
+        if (!entry) {
+            const custom = CUSTOM_SERVERS.find(s => s.address === address);
+            if (custom) {
+                entry = {
+                    id: custom.id,
+                    name: custom.name,
+                    description: custom.description,
+                    address: custom.address,
+                    location: custom.location,
+                    gamemode: custom.gamemode,
+                    players: custom.players,
+                    maxPlayers: custom.maxPlayers,
+                    isCurrent: true
+                };
+                servers.push(entry);
+            }
+        }
+
+        servers.forEach(s => {
+            s.isCurrent = s.address === address;
+            if (s.address === address && name) s.name = name;
+        });
+
+        writeJSON('gameservers', servers);
+    };
+
+    const selectPrivateServer = (server) => {
+        document.querySelectorAll('table.server-table tr').forEach(tr => tr.classList.remove('active'));
+        const row = document.getElementById('serverRow' + server.id);
+        if (row) row.classList.add('active');
+
+        saveSelectedServer(server.address, server.name);
+
+        if (typeof window.setserver === 'function') {
+            window.setserver(server.address, server.name);
+        }
+        handleElementVisibility();
+    };
+
+    const injectCustomServer = () => {
+        const container = document.querySelector('.tabbed');
+        if (!container || document.getElementById('tabPRIV')) return;
+
+        const privRadio = document.createElement('input');
+        privRadio.name = 'tabbed';
+        privRadio.id = 'tabPRIV';
+        privRadio.type = 'radio';
+
+        const rows = CUSTOM_SERVERS.map(server => `
+            <tr id="serverRow${server.id}" title="${server.description}">
+                <td>${server.name}</td>
+                <td id="serverPlayers${server.id}">${server.players}/${server.maxPlayers}</td>
+                <td>${server.gamemode}</td>
+            </tr>
+        `).join('');
+
+        const privSection = document.createElement('section');
+        privSection.id = 'sectPRIV';
+        privSection.innerHTML = `
+            <h1><label for="tabPRIV">Private</label></h1>
+            <div class="server-tabmenu">
+                <table class="server-table">
+                    <thead>
+                        <tr>
+                            <th>Server</th>
+                            <th>Players</th>
+                            <th>Game Mode</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+
+        container.appendChild(privRadio);
+        container.appendChild(privSection);
+
+        CUSTOM_SERVERS.forEach(server => {
+            const row = document.getElementById('serverRow' + server.id);
+            if (row) row.addEventListener('click', () => selectPrivateServer(server));
+        });
+    };
+
+    const restoreActiveRow = () => {
+        const selected = localStorage.getItem(LS_SELECTED);
+        if (!selected) return;
+
+        const server = CUSTOM_SERVERS.find(s => s.address === selected);
+        if (!server) return;
+
+        const row = document.getElementById('serverRow' + server.id);
+        if (row) {
+            document.querySelectorAll('table.server-table tr').forEach(tr => tr.classList.remove('active'));
+            row.classList.add('active');
+        }
+    };
+
+    const handleElementVisibility = () => {
+        const idsToHide = ['challengeInfoBox', 'game-tips'];
+        const isPrivateActive = !!document.querySelector('#sectPRIV .server-table tr.active');
+
+        idsToHide.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('priv-hidden', isPrivateActive);
+        });
+    };
+
+    const wrapSetServer = () => {
+        if (window.__privSetServerWrapped || typeof window.setserver !== 'function') return;
+        const original = window.setserver;
+
+        window.setserver = window.connectserver = function (address, label) {
+            if (CUSTOM_SERVERS.some(s => s.address === address)) {
+                saveSelectedServer(address, label);
+            } else {
+                localStorage.removeItem(LS_SELECTED);
+            }
+            return original.apply(this, arguments);
+        };
+
+        window.__privSetServerWrapped = true;
+    };
+
+    const run = () => {
+        injectStyles();
+        syncCustomServers();
+        injectCustomServer();
+        restoreActiveRow();
+        wrapSetServer();
+        handleElementVisibility();
+    };
+
+    new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
+    setInterval(run, 1000);
+})();
